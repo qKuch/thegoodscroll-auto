@@ -1,0 +1,52 @@
+name: Meme Bot
+
+on:
+  schedule:
+    # o data la 6 ore (UTC). Editeaza dupa nevoie: https://crontab.guru
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}  # permite rulare manuala din tab-ul Actions
+
+permissions:
+  contents: write  # necesar ca GITHUB_TOKEN sa poata face push la posted_ids.json
+
+concurrency:
+  group: meme-bot
+  cancel-in-progress: false  # nu lasa doua rulari sa scrie simultan in posted_ids.json
+
+jobs:
+  post-meme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run meme bot
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          SUBREDDITS: ${{ vars.SUBREDDITS }}
+          MIN_UPVOTES: ${{ vars.MIN_UPVOTES }}
+          POST_LIMIT_PER_RUN: ${{ vars.POST_LIMIT_PER_RUN }}
+        run: python meme_bot.py
+
+      - name: Commit & push posted_ids.json daca s-a schimbat
+        run: |
+          git config user.name "meme-bot"
+          git config user.email "meme-bot@users.noreply.github.com"
+          if [ -n "$(git status --porcelain posted_ids.json)" ]; then
+            git add posted_ids.json
+            git commit -m "chore: update posted_ids.json [skip ci]"
+            git push
+          else
+            echo "Niciun ID nou/esuat, nimic de comis."
+          fi
