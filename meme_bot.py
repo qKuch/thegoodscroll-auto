@@ -40,19 +40,19 @@ logger = logging.getLogger("meme_bot")
 
 SUBREDDITS = [
     s.strip()
-    for s in os.environ.get("SUBREDDITS", "memes,wholesomememes").split(",")
+    for s in (os.environ.get("SUBREDDITS") or "memes,wholesomememes").split(",")
     if s.strip()
 ]
-MIN_UPVOTES = int(os.environ.get("MIN_UPVOTES", "1000"))
-POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN", "1"))
-FETCH_LIMIT = int(os.environ.get("FETCH_LIMIT", "25"))
-POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE", "posted_ids.json"))
+MIN_UPVOTES = int(os.environ.get("MIN_UPVOTES") or "1000")
+POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
+FETCH_LIMIT = int(os.environ.get("FETCH_LIMIT") or "25")
+POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
 
 IG_USER_ID = os.environ.get("IG_USER_ID")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
 
-REDDIT_USER_AGENT = os.environ.get(
-    "REDDIT_USER_AGENT", "meme-bot/1.0 (github actions; contact: set REDDIT_USER_AGENT)"
+REDDIT_USER_AGENT = os.environ.get("REDDIT_USER_AGENT") or (
+    "meme-bot/1.0 (github actions; contact: set REDDIT_USER_AGENT)"
 )
 
 GRAPH_API_VERSION = "v21.0"
