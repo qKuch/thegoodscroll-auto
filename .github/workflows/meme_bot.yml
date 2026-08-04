@@ -34,7 +34,8 @@ jobs:
         env:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
-          SUBREDDITS: ${{ vars.SUBREDDITS }}
+          IMGUR_CLIENT_ID: ${{ secrets.IMGUR_CLIENT_ID }}
+          IMGUR_TOPICS: ${{ vars.IMGUR_TOPICS }}
           MIN_UPVOTES: ${{ vars.MIN_UPVOTES }}
           POST_LIMIT_PER_RUN: ${{ vars.POST_LIMIT_PER_RUN }}
         run: python meme_bot.py
