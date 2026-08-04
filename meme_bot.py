@@ -1,23 +1,32 @@
 """
 meme_bot.py
 
-Preia postările "hot" din subreddit-uri configurabile (API JSON public,
-fara autentificare), le filtreaza dupa un minim de upvote-uri si exclude
-imaginile deja postate, apoi posteaza cea mai buna postare noua pe
-Instagram (cont Business/Creator) prin Graph API.
+Preia postari populare ("hot") din galeria publica Imgur, le filtreaza
+dupa un minim de puncte (upvote-uri) si exclude imaginile deja postate,
+apoi posteaza cea mai buna postare noua pe Instagram (cont Business/Creator)
+prin Graph API.
+
+Nota: sursa initiala a fost Reddit, dar Reddit a oprit accesul neautentificat
+la endpoint-urile .json pe 28 mai 2026, iar auto-inregistrarea de aplicatii
+OAuth Reddit e in prezent (aug 2026) nefunctionala/blocata manual de Reddit
+("Responsible Builder Policy"). Imgur ramane self-serve si necesita doar un
+Client ID (fara login de utilizator) pentru acces citire la galeria publica.
 
 Variabile de mediu necesare:
-    IG_USER_ID        - ID-ul contului Instagram Business/Creator
-    IG_ACCESS_TOKEN   - token de acces (long-lived) pentru Graph API
+    IG_USER_ID          - ID-ul contului Instagram Business/Creator
+    IG_ACCESS_TOKEN      - token de acces (long-lived) pentru Graph API
+    IMGUR_CLIENT_ID       - Client ID-ul aplicatiei Imgur (tip "Anonymous
+                            usage without user authorization")
 
 Variabile de mediu optionale:
-    SUBREDDITS         - lista de subreddit-uri, separate prin virgula
-                          (implicit: "memes,wholesomememes")
-    MIN_UPVOTES         - prag minim de upvote-uri (implicit: 1000)
+    IMGUR_TOPICS        - cuvinte-cheie (separate prin virgula) cautate in
+                          titlu/tag-urile postarii, pentru filtrare tematica
+                          (implicit: gol = fara filtrare, doar "hot" general)
+    MIN_UPVOTES         - prag minim de puncte Imgur (implicit: 1000)
     POST_LIMIT_PER_RUN  - cate postari noi se publica per rulare (implicit: 1)
-    FETCH_LIMIT         - cate postari "hot" se preiau per subreddit (implicit: 25)
+    FETCH_PAGES         - cate pagini din galeria "hot" se preiau, cate
+                          ~60 postari fiecare (implicit: 1)
     POSTED_IDS_FILE     - calea catre fisierul de evidenta (implicit: posted_ids.json)
-    REDDIT_USER_AGENT   - User-Agent trimis catre Reddit
 """
 
 import json
@@ -38,27 +47,30 @@ logger = logging.getLogger("meme_bot")
 # Configurare
 # ---------------------------------------------------------------------------
 
-SUBREDDITS = [
-    s.strip()
-    for s in (os.environ.get("SUBREDDITS") or "memes,wholesomememes").split(",")
+# Notă: folosim `os.environ.get("X") or "default"` in loc de
+# `os.environ.get("X", "default")` pentru ca GitHub Actions seteaza
+# variabila ca string gol ('') cand un Repository Variable nu e definit,
+# nu o omite complet — iar .get() cu valoare implicita nu prinde cazul asta.
+IMGUR_TOPICS = [
+    s.strip().lower()
+    for s in (os.environ.get("IMGUR_TOPICS") or "").split(",")
     if s.strip()
 ]
 MIN_UPVOTES = int(os.environ.get("MIN_UPVOTES") or "1000")
 POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
-FETCH_LIMIT = int(os.environ.get("FETCH_LIMIT") or "25")
+FETCH_PAGES = int(os.environ.get("FETCH_PAGES") or "1")
 POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
 
 IG_USER_ID = os.environ.get("IG_USER_ID")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
 
-REDDIT_USER_AGENT = os.environ.get("REDDIT_USER_AGENT") or (
-    "meme-bot/1.0 (github actions; contact: set REDDIT_USER_AGENT)"
-)
+IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID")
 
 GRAPH_API_VERSION = "v21.0"
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+IMGUR_API_BASE = "https://api.imgur.com/3"
+ALLOWED_MIME_TYPES = ("image/jpeg", "image/png")
 
 
 # ---------------------------------------------------------------------------
@@ -94,56 +106,72 @@ def save_seen_ids(posted_ids, failed_ids):
 
 
 # ---------------------------------------------------------------------------
-# Reddit
+# Imgur (galeria publica "hot" — necesita doar Client ID, fara login)
 # ---------------------------------------------------------------------------
 
-def fetch_hot_posts(subreddit, limit=25):
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json"
-    headers = {"User-Agent": REDDIT_USER_AGENT}
-    params = {"limit": limit}
-    resp = requests.get(url, headers=headers, params=params, timeout=15)
+def fetch_hot_gallery_page(page):
+    url = f"{IMGUR_API_BASE}/gallery/hot/viral/{page}.json"
+    headers = {
+        "Authorization": f"Client-ID {IMGUR_CLIENT_ID}",
+        "User-Agent": "thegoodscroll-bot/1.0",
+    }
+    resp = requests.get(url, headers=headers, timeout=15)
     resp.raise_for_status()
     payload = resp.json()
-    return [child["data"] for child in payload["data"]["children"]]
+    if not payload.get("success"):
+        raise RuntimeError(f"Raspuns Imgur nereusit: {payload}")
+    return payload.get("data") or []
 
 
-def is_direct_image_url(url):
-    if not url:
-        return False
-    lower = url.lower().split("?")[0]
-    return lower.endswith(IMAGE_EXTENSIONS)
+def matches_topics(item):
+    """Fara IMGUR_TOPICS configurat, acceptam orice postare din galeria hot."""
+    if not IMGUR_TOPICS:
+        return True
+    title = (item.get("title") or "").lower()
+    tag_names = [t.get("name", "").lower() for t in (item.get("tags") or [])]
+    haystack = title + " " + " ".join(tag_names)
+    return any(topic in haystack for topic in IMGUR_TOPICS)
 
 
 def find_candidates():
-    """Aduna postari eligibile din toate subreddit-urile, sortate descrescator dupa scor."""
+    """Aduna postari eligibile din galeria hot Imgur, sortate descrescator dupa scor."""
     candidates = []
-    for sub in SUBREDDITS:
+    for page in range(FETCH_PAGES):
         try:
-            posts = fetch_hot_posts(sub, FETCH_LIMIT)
+            items = fetch_hot_gallery_page(page)
         except requests.RequestException as e:
-            logger.error(f"Eroare la preluarea r/{sub}: {e}")
+            logger.error(f"Eroare la preluarea paginii {page} din galeria Imgur: {e}")
             continue
 
-        for post in posts:
-            if post.get("stickied") or post.get("over_18"):
+        for item in items:
+            if item.get("is_album"):
                 continue
-            if post.get("score", 0) < MIN_UPVOTES:
+            if item.get("nsfw"):
+                continue
+            if item.get("type") not in ALLOWED_MIME_TYPES:
                 continue
 
-            image_url = post.get("url_overridden_by_dest") or post.get("url")
-            is_image_hint = post.get("post_hint") == "image"
-            if not (is_image_hint and is_direct_image_url(image_url)):
+            score = item.get("points")
+            if score is None:
+                score = item.get("ups", 0) or 0
+            if score < MIN_UPVOTES:
+                continue
+
+            if not matches_topics(item):
+                continue
+
+            image_url = item.get("link")
+            if not image_url:
                 continue
 
             candidates.append(
                 {
-                    "id": post["id"],
-                    "subreddit": post.get("subreddit", sub),
-                    "author": post.get("author", "unknown"),
-                    "title": (post.get("title") or "").strip(),
-                    "score": post.get("score", 0),
+                    "id": item["id"],
+                    "author": item.get("account_url") or None,
+                    "title": (item.get("title") or "").strip() or "Untitled",
+                    "score": score,
                     "image_url": image_url,
-                    "permalink": f"https://reddit.com{post.get('permalink', '')}",
+                    "permalink": f"https://imgur.com/gallery/{item['id']}",
                 }
             )
 
@@ -159,11 +187,17 @@ def build_caption(post):
     title = post["title"]
     if len(title) > 200:
         title = title[:197] + "..."
+
+    if post["author"]:
+        credit_line = f"📸 Credit: {post['author']} (via Imgur)"
+    else:
+        credit_line = "📸 Credit: anonymous Imgur user"
+
     return (
         f"{title}\n\n"
-        f"📸 Credit: u/{post['author']} din r/{post['subreddit']}\n"
+        f"{credit_line}\n"
         f"🔗 {post['permalink']}\n\n"
-        f"#memes #{post['subreddit']}"
+        f"#memes #imgur"
     )
 
 
@@ -230,6 +264,8 @@ def post_to_instagram(post):
 def main():
     if not IG_USER_ID or not IG_ACCESS_TOKEN:
         raise SystemExit("Lipsesc variabilele de mediu IG_USER_ID / IG_ACCESS_TOKEN.")
+    if not IMGUR_CLIENT_ID:
+        raise SystemExit("Lipseste variabila de mediu IMGUR_CLIENT_ID.")
 
     posted_ids, failed_ids = load_seen_ids()
     seen_ids = posted_ids | failed_ids
