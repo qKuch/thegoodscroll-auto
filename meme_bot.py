@@ -190,7 +190,7 @@ def find_tumblr_candidates():
             if not photos:
                 continue
             image_url = (photos[0].get("original_size") or {}).get("url")
-            if not image_url:
+            if not image_url or is_blocked_domain(image_url):
                 continue
 
             title = (post.get("summary") or "").strip() or "Meme"
@@ -216,7 +216,14 @@ def find_tumblr_candidates():
 # individuala pe autor/sursa per meme.
 # ---------------------------------------------------------------------------
 
-def fetch_humorapi_memes(count):
+REDDIT_HOSTED_DOMAINS = ("redd.it",)
+
+
+def is_blocked_domain(image_url):
+    """Instagram refuza sa preia imagini gazduite pe domenii Reddit
+    (i.redd.it, preview.redd.it etc.) — filtram preventiv, ca sa nu
+    incercam publicarea unei postari care va esua oricum."""
+    return any(domain in image_url for domain in REDDIT_HOSTED_DOMAINS)
     url = f"{HUMOR_API_BASE}/memes/random"
     params = {
         "api-key": HUMOR_API_KEY,
@@ -260,7 +267,7 @@ def find_humorapi_candidates():
             continue
 
         image_url = meme.get("url")
-        if not image_url:
+        if not image_url or is_blocked_domain(image_url):
             continue
 
         rating = meme.get("rating", MIN_RATING_HUMORAPI)
