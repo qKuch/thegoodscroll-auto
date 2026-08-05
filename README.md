@@ -75,8 +75,13 @@ implicat (o listă de ID-uri).
 1. Din **Graph API Explorer**
    (https://developers.facebook.com/tools/explorer/), selectează
    aplicația ta, cu **User Token**.
-2. Bifează permisiunile: `instagram_basic`, `instagram_content_publish`,
+2. Bifează permisiunile: `instagram_business_basic`,
+   `instagram_business_content_publish`,
    `pages_show_list`, `pages_read_engagement`, `business_management`.
+   (Numele vechi, `instagram_basic` și `instagram_content_publish`, au
+   fost înlocuite oficial de Meta pe 27 ianuarie 2025 — dacă le vezi pe
+   cele vechi bifate undeva dintr-un tutorial, nu mai funcționează
+   pentru publicare, doar cele noi.)
 3. Rulează `GET me/accounts` — obții ID-ul Paginii de Facebook
    conectate.
 4. Rulează `GET {page-id}?fields=instagram_business_account` (înlocuiește
@@ -140,7 +145,7 @@ Opțional, în **Settings → Secrets and variables → Actions → Variables**
 | Nume | Exemplu | Implicit dacă lipsește |
 |---|---|---|
 | `TUMBLR_TAGS` | `memes,funny,wholesome` | `memes` |
-| `MIN_NOTES_TUMBLR` | `2000` | `500` |
+| `MIN_NOTES_TUMBLR` | `2000` | `20` |
 | `HUMOR_API_KEYWORDS` | `cats,work` | gol (fără filtrare) |
 | `MIN_RATING_HUMORAPI` | `8` | `7` (scala 0-10) |
 | `POST_LIMIT_PER_RUN` | `1` | `1` |
@@ -199,9 +204,13 @@ ca să nu prinzi token-ul expirat.
   încadrează vor eșua la publicare — scriptul le marchează ca eșuate
   (`failed`) și trece la următorul candidat, ca să nu reîncerce la
   infinit aceeași postare.
-- **`TUMBLR_FETCH_LIMIT` / `HUMOR_API_COUNT`**: câte postări se cer per
-  sursă, per rulare (implicit 20 la ambele) — crește dacă vrei un bazin
-  mai mare de candidați.
+- **`TUMBLR_FETCH_LIMIT`**: câte postări se cer per tag Tumblr, per rulare
+  (implicit 20) — crește dacă vrei un bazin mai mare de candidați.
+- **`HUMOR_API_COUNT`**: câte apeluri separate se fac către Humor API per
+  rulare (implicit 3, deliberat conservator — planul gratuit are o cotă
+  zilnică mică, iar depășirea ei dă eroare `402 Payment Required`).
+  Verifică pe humorapi.com/dashboard cota ta reală și crește valoarea
+  doar dacă permite.
 
 ## Structura proiectului
 

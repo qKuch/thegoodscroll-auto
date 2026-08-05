@@ -26,7 +26,10 @@ Variabile de mediu optionale:
     TUMBLR_TAGS          - tag-uri Tumblr (separate prin virgula), ex.
                           "memes,funny" (implicit: "memes")
     MIN_NOTES_TUMBLR     - prag minim de note (like-uri + reblog-uri) pe
-                          Tumblr (implicit: 500)
+                          Tumblr (implicit: 20 — feed-ul /tagged pare sa
+                          fie predominant cronologic, nu neaparat sortat
+                          dupa popularitate, deci postarile proaspete au
+                          adesea 0 note; un prag mare le exclude pe toate)
     TUMBLR_FETCH_LIMIT   - cate postari se preiau per tag Tumblr per
                           rulare (implicit: 20)
     HUMOR_API_KEYWORDS   - cuvinte-cheie pentru Humor API (separate prin
@@ -35,7 +38,9 @@ Variabile de mediu optionale:
                           (implicit: 7)
     HUMOR_API_COUNT      - cate apeluri separate se fac catre Humor API per
                           rulare (endpoint-ul intoarce un singur meme per
-                          apel) (implicit: 10)
+                          apel) (implicit: 3 — planul gratuit are o cota
+                          zilnica mica; verifica humorapi.com/dashboard
+                          pentru cota reala si ajusteaza daca permite mai mult)
     POST_LIMIT_PER_RUN   - cate postari noi se publica per rulare (implicit: 1)
     POSTED_IDS_FILE      - calea catre fisierul de evidenta (implicit: posted_ids.json)
 """
@@ -68,7 +73,7 @@ TUMBLR_TAGS = [
     for s in (os.environ.get("TUMBLR_TAGS") or "memes").split(",")
     if s.strip()
 ]
-MIN_NOTES_TUMBLR = int(os.environ.get("MIN_NOTES_TUMBLR") or "500")
+MIN_NOTES_TUMBLR = int(os.environ.get("MIN_NOTES_TUMBLR") or "20")
 TUMBLR_FETCH_LIMIT = int(os.environ.get("TUMBLR_FETCH_LIMIT") or "20")
 
 HUMOR_API_KEYWORDS = [
@@ -77,7 +82,7 @@ HUMOR_API_KEYWORDS = [
     if s.strip()
 ]
 MIN_RATING_HUMORAPI = float(os.environ.get("MIN_RATING_HUMORAPI") or "7")
-HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "10")
+HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "3")
 
 POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
 POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
