@@ -199,6 +199,9 @@ def find_tumblr_candidates():
             logger.error(f"Eroare la preluarea tag-ului Tumblr '{tag}': {e}")
             continue
 
+        if posts:
+            logger.info(f"[DEBUG TEMPORAR] Prima postare Tumblr bruta: {json.dumps(posts[0])[:3000]}")
+
         for post in posts:
             post_id = post.get("id")
             if not post_id or post_id in seen_post_ids:
