@@ -26,10 +26,10 @@ Variabile de mediu optionale:
     TUMBLR_TAGS          - tag-uri Tumblr (separate prin virgula), ex.
                           "memes,funny" (implicit: "memes")
     MIN_NOTES_TUMBLR     - prag minim de note (like-uri + reblog-uri) pe
-                          Tumblr (implicit: 20 — feed-ul /tagged pare sa
-                          fie predominant cronologic, nu neaparat sortat
-                          dupa popularitate, deci postarile proaspete au
-                          adesea 0 note; un prag mare le exclude pe toate)
+                          Tumblr (implicit: 1 — feed-ul /tagged e strict
+                          cronologic, nu sortat dupa popularitate; intr-un
+                          esantion real, notele mergeau de la 0 la 3, deci
+                          un prag mare exclude practic totul)
     TUMBLR_FETCH_LIMIT   - cate postari se preiau per tag Tumblr per
                           rulare (implicit: 20)
     HUMOR_API_KEYWORDS   - cuvinte-cheie pentru Humor API (separate prin
@@ -73,7 +73,7 @@ TUMBLR_TAGS = [
     for s in (os.environ.get("TUMBLR_TAGS") or "memes").split(",")
     if s.strip()
 ]
-MIN_NOTES_TUMBLR = int(os.environ.get("MIN_NOTES_TUMBLR") or "20")
+MIN_NOTES_TUMBLR = int(os.environ.get("MIN_NOTES_TUMBLR") or "1")
 TUMBLR_FETCH_LIMIT = int(os.environ.get("TUMBLR_FETCH_LIMIT") or "20")
 
 HUMOR_API_KEYWORDS = [
@@ -197,13 +197,6 @@ def find_tumblr_candidates():
         except requests.RequestException as e:
             logger.error(f"Eroare la preluarea tag-ului Tumblr '{tag}': {e}")
             continue
-
-        if posts:
-            summary = [
-                f"(notes={p.get('note_count')}, has_img={bool(extract_tumblr_image_url(p))}, type={p.get('type')})"
-                for p in posts
-            ]
-            logger.info(f"[DEBUG TEMPORAR] {len(posts)} postari pentru tag '{tag}': {summary}")
 
         for post in posts:
             post_id = post.get("id")
