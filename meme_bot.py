@@ -147,7 +147,6 @@ def fetch_tumblr_tagged(tag, limit):
         "tag": tag,
         "api_key": TUMBLR_API_KEY,
         "limit": limit,
-        "filter": "text",
     }
     resp = requests.get(url, params=params, timeout=15)
     resp.raise_for_status()
