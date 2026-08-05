@@ -224,6 +224,9 @@ def is_blocked_domain(image_url):
     (i.redd.it, preview.redd.it etc.) — filtram preventiv, ca sa nu
     incercam publicarea unei postari care va esua oricum."""
     return any(domain in image_url for domain in REDDIT_HOSTED_DOMAINS)
+
+
+def fetch_humorapi_memes(count):
     url = f"{HUMOR_API_BASE}/memes/random"
     params = {
         "api-key": HUMOR_API_KEY,
