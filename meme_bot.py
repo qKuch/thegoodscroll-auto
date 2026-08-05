@@ -33,8 +33,9 @@ Variabile de mediu optionale:
                           virgula), optional (implicit: fara filtrare)
     MIN_RATING_HUMORAPI  - prag minim de rating Humor API, scala 0-10
                           (implicit: 7)
-    HUMOR_API_COUNT      - cate meme-uri se cer per rulare de la Humor API
-                          (implicit: 20)
+    HUMOR_API_COUNT      - cate apeluri separate se fac catre Humor API per
+                          rulare (endpoint-ul intoarce un singur meme per
+                          apel) (implicit: 10)
     POST_LIMIT_PER_RUN   - cate postari noi se publica per rulare (implicit: 1)
     POSTED_IDS_FILE      - calea catre fisierul de evidenta (implicit: posted_ids.json)
 """
@@ -42,6 +43,7 @@ Variabile de mediu optionale:
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -75,7 +77,7 @@ HUMOR_API_KEYWORDS = [
     if s.strip()
 ]
 MIN_RATING_HUMORAPI = float(os.environ.get("MIN_RATING_HUMORAPI") or "7")
-HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "20")
+HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "10")
 
 POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
 POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
@@ -155,8 +157,29 @@ def fetch_tumblr_tagged(tag, limit):
     return response
 
 
+IMG_SRC_RE = re.compile(r'<img[^>]+src="([^"]+)"')
+
+
+def extract_tumblr_image_url(post):
+    """Tumblr modern marcheaza majoritatea postarilor ca type='text', chiar
+    si cand contin imagini — imaginea e in HTML-ul din 'body', nu intr-un
+    array 'photos' separat (asta mai apare doar la postari-foto vechi)."""
+    photos = post.get("photos") or []
+    if photos:
+        url = (photos[0].get("original_size") or {}).get("url")
+        if url:
+            return url
+
+    body = post.get("body") or ""
+    match = IMG_SRC_RE.search(body)
+    if match:
+        return match.group(1)
+
+    return None
+
+
 def find_tumblr_candidates():
-    """Aduna postari-foto eligibile de pe Tumblr, sortate descrescator dupa note."""
+    """Aduna postari eligibile de pe Tumblr, sortate descrescator dupa note."""
     if not TUMBLR_API_KEY:
         logger.info("TUMBLR_API_KEY lipseste — sar peste sursa Tumblr.")
         return []
@@ -177,8 +200,6 @@ def find_tumblr_candidates():
                 continue
             seen_post_ids.add(post_id)
 
-            if post.get("type") != "photo":
-                continue
             if post.get("is_nsfw"):
                 continue
 
@@ -186,10 +207,7 @@ def find_tumblr_candidates():
             if note_count < MIN_NOTES_TUMBLR:
                 continue
 
-            photos = post.get("photos") or []
-            if not photos:
-                continue
-            image_url = (photos[0].get("original_size") or {}).get("url")
+            image_url = extract_tumblr_image_url(post)
             if not image_url or is_blocked_domain(image_url):
                 continue
 
@@ -227,24 +245,36 @@ def is_blocked_domain(image_url):
 
 
 def fetch_humorapi_memes(count):
+    """Endpoint-ul /memes/random intoarce mereu un singur meme per apel,
+    indiferent de parametrul 'number' — facem `count` apeluri separate ca
+    sa avem un bazin de candidati, nu doar unul."""
     url = f"{HUMOR_API_BASE}/memes/random"
     params = {
         "api-key": HUMOR_API_KEY,
-        "number": count,
         "min-rating": MIN_RATING_HUMORAPI,
     }
     if HUMOR_API_KEYWORDS:
         params["keywords"] = ",".join(HUMOR_API_KEYWORDS)
 
-    resp = requests.get(url, params=params, timeout=15)
-    resp.raise_for_status()
-    payload = resp.json()
+    memes = []
+    seen_meme_ids = set()
+    for _ in range(count):
+        resp = requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
 
-    memes = payload.get("memes")
-    if memes is None and payload.get("url"):
-        # unele raspunsuri pot veni ca un singur obiect, nu o lista
-        memes = [payload]
-    return memes or []
+        meme = None
+        payload_memes = payload.get("memes")
+        if payload_memes:
+            meme = payload_memes[0]
+        elif payload.get("url"):
+            meme = payload
+
+        if meme and meme.get("id") not in seen_meme_ids:
+            seen_meme_ids.add(meme.get("id"))
+            memes.append(meme)
+
+    return memes
 
 
 def find_humorapi_candidates():
