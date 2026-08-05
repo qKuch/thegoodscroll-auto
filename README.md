@@ -1,33 +1,41 @@
-# Meme Bot pentru Instagram (Imgur → Instagram, prin GitHub Actions)
+# Meme Bot pentru Instagram (Tumblr + Humor API → Instagram, prin GitHub Actions)
 
-Bot care preia automat cele mai populare postări de tip imagine din
-galeria publică "hot" de pe Imgur și le postează pe un cont Instagram
-Business/Creator, cu credit pentru autorul original. Rulează integral pe
+Bot care preia automat postări populare de tip imagine din **două surse
+independente** — Tumblr (postări cu tag-uri configurabile) și Humor API —
+și le postează pe un cont Instagram Business/Creator. Rulează integral pe
 GitHub Actions — fără server propriu, fără cron local.
 
-> **Notă istorică**: sursa inițială a proiectului a fost Reddit. Reddit
-> a oprit accesul neautentificat la `.json` pe 28 mai 2026, iar
-> auto-înregistrarea de aplicații OAuth Reddit e în prezent (aug 2026)
-> blocată/nefuncțională din partea lor ("Responsible Builder Policy").
-> Am trecut pe Imgur, care rămâne self-serve și mult mai simplu de
-> configurat.
+> **Notă istorică**: sursa inițială a proiectului a fost Reddit, apoi
+> Imgur. Reddit a oprit accesul neautentificat la `.json` pe 28 mai 2026
+> și a blocat și auto-înregistrarea de aplicații OAuth noi
+> ("Responsible Builder Policy"). Imgur a fost la rândul lui înlocuit —
+> galeria lui generală "hot" nu mai e suficient de orientată spre
+> meme-uri. Am trecut pe Tumblr + Humor API, folosite în paralel, ca
+> bot-ul să nu depindă complet de un singur furnizor.
 
 ## Cum funcționează
 
-1. `meme_bot.py` interoghează galeria publică "hot" de pe Imgur
-   (`api.imgur.com/3/gallery/hot/viral/...`) — necesită doar un Client ID
-   (fără login de utilizator, fără parolă).
-2. Filtrează postările: elimină albume, conținut NSFW, tot ce nu e
-   imagine directă (jpg/png), cele sub pragul de puncte configurat, și
+1. `meme_bot.py` interoghează **ambele surse** în fiecare rulare:
+   - **Tumblr**: postările cu tag-uri configurabile (implicit: `memes`),
+     din tot Tumblr (nu doar dintr-un blog anume) — necesită doar un API
+     key (fără login de utilizator).
+   - **Humor API**: baza dedicată de meme-uri (peste 300.000), filtrată
+     după un rating minim — necesită un API key gratuit.
+   Fiecare sursă e opțională independent — dacă lipsește cheia uneia,
+   bot-ul continuă cu cealaltă, fără să pice.
+2. Filtrează postările: elimină conținut care nu e postare-foto directă,
+   cele sub pragul de scor configurat (per sursă — vezi mai jos), și
    cele deja postate sau eșuate anterior (evidența e ținută în
-   `posted_ids.json`). Opțional, poate filtra și după cuvinte-cheie
-   (`IMGUR_TOPICS`) căutate în titlu/tag-uri.
-3. Postează imaginea câștigătoare pe Instagram prin Graph API (Content
-   Publishing API), cu un caption care include titlul, username-ul
-   autorului (dacă există) și link către postarea originală pe Imgur.
-4. Actualizează `posted_ids.json` și îl comite automat înapoi în repo,
+   `posted_ids.json`).
+3. Combină rezultatele celor două surse **alternând între ele** (nu le
+   amestecă după un scor comun — notele Tumblr și rating-ul Humor API
+   sunt pe scale diferite, deci nu sunt comparabile direct).
+4. Postează imaginea câștigătoare pe Instagram prin Graph API (Content
+   Publishing API), cu un caption care include titlul și creditul sursei
+   ("Via Tumblr" / "Via Humor API").
+5. Actualizează `posted_ids.json` și îl comite automat înapoi în repo,
    ca să persiste între rulările (efemere) ale GitHub Actions.
-5. Workflow-ul GitHub Actions rulează scriptul la un interval fix
+6. Workflow-ul GitHub Actions rulează scriptul la un interval fix
    (implicit: o dată la 6 ore).
 
 ### De ce commit automat pentru persistență?
@@ -93,21 +101,24 @@ https://graph.facebook.com/v21.0/oauth/access_token
 Răspunsul conține `access_token`-ul de lungă durată — acesta e
 `IG_ACCESS_TOKEN`.
 
-### 5. Client ID Imgur
+### 5. API key Tumblr
 
-1. Cont Imgur (dacă nu ai deja) → https://imgur.com
-2. Mergi pe https://api.imgur.com/oauth2/addclient
-3. Completezi:
-   - **Application name**: orice, ex. `thegoodscroll-bot`
-   - **Authorization type**: **"Anonymous usage without user
-     authorization"** — exact ce ne trebuie, nu necesită login de
-     utilizator la fiecare rulare
-   - **Email**: adresa ta
-4. Confirmi „I'm not a robot" → **Submit**.
-5. Primești imediat un **Client ID** — asta e `IMGUR_CLIENT_ID`. (Nu ai
-   nevoie de Client Secret pentru acest tip de acces.)
+1. Cont Tumblr (dacă nu ai deja) → https://www.tumblr.com
+2. Mergi pe https://www.tumblr.com/oauth/apps
+3. **Register a new application**, completezi formularul (nume, scurtă
+   descriere, URL — poți pune orice, ex. `https://github.com`).
+4. După înregistrare, primești un **OAuth Consumer Key** — acesta e
+   `TUMBLR_API_KEY`. (Nu ai nevoie de Consumer Secret pentru citire
+   publică.)
 
-### 6. Adăugarea secretelor în GitHub
+### 6. API key Humor API
+
+1. Mergi pe https://humorapi.com și creează un cont (dacă nu ai deja).
+2. Din contul tău, generezi un **API key** — apare direct în dashboard,
+   fără review manual.
+3. Copiezi cheia — asta e `HUMOR_API_KEY`.
+
+### 7. Adăugarea secretelor în GitHub
 
 În repo → **Settings → Secrets and variables → Actions → New
 repository secret**:
@@ -116,18 +127,25 @@ repository secret**:
 |---|---|
 | `IG_USER_ID` | ID-ul obținut la pasul 3 |
 | `IG_ACCESS_TOKEN` | token-ul de lungă durată de la pasul 4 |
-| `IMGUR_CLIENT_ID` | Client ID-ul de la pasul 5 |
+| `TUMBLR_API_KEY` | Consumer Key-ul de la pasul 5 |
+| `HUMOR_API_KEY` | API key-ul de la pasul 6 |
+
+Ai nevoie de **cel puțin una** din `TUMBLR_API_KEY` / `HUMOR_API_KEY`
+ca bot-ul să pornească — dar recomand ambele, exact ca să existe
+redundanță dacă una din surse pică vreodată.
 
 Opțional, în **Settings → Secrets and variables → Actions → Variables**
 (nu sunt secrete, doar configurare, cu valori implicite dacă lipsesc):
 
 | Nume | Exemplu | Implicit dacă lipsește |
 |---|---|---|
-| `IMGUR_TOPICS` | `meme,funny,wholesome` | gol (fără filtrare tematică) |
-| `MIN_UPVOTES` | `2000` | `1000` |
+| `TUMBLR_TAGS` | `memes,funny,wholesome` | `memes` |
+| `MIN_NOTES_TUMBLR` | `2000` | `500` |
+| `HUMOR_API_KEYWORDS` | `cats,work` | gol (fără filtrare) |
+| `MIN_RATING_HUMORAPI` | `8` | `7` (scala 0-10) |
 | `POST_LIMIT_PER_RUN` | `1` | `1` |
 
-### 7. Pune fișierele în repo
+### 8. Pune fișierele în repo
 
 Adaugă toate fișierele livrate (inclusiv `.github/workflows/meme_bot.yml`
 și `posted_ids.json`) în repo și fă push. GitHub Actions detectează
@@ -141,7 +159,7 @@ După setup-ul de mai sus:
 
 - Workflow-ul pornește singur, conform programului `cron` (implicit la
   fiecare 6 ore — editabil în `.github/workflows/meme_bot.yml`).
-- Scriptul verifică galeria Imgur, alege cea mai potrivită postare
+- Scriptul verifică Tumblr și Humor API, alege cea mai potrivită postare
   nouă, o publică pe Instagram și actualizează `posted_ids.json`.
 - Modificarea e comisă automat înapoi în repo — nu trebuie să faci
   nimic manual.
@@ -149,7 +167,7 @@ După setup-ul de mai sus:
   **Meme Bot** → **Run workflow** (util pentru testare).
 
 Singurul lucru care necesită intervenție periodică e token-ul de
-Instagram (Imgur Client ID-ul nu expiră).
+Instagram (nici cheia Tumblr, nici cheia Humor API nu expiră).
 
 ## Reînnoirea token-ului Instagram (la ~60 de zile)
 
@@ -166,25 +184,24 @@ ca să nu prinzi token-ul expirat.
 
 ## Note importante
 
-- **Drepturi de autor**: bot-ul include mereu creditul sursei
-  (username Imgur sau „anonymous Imgur user" dacă postarea nu are
-  autor asociat), dar redistribuirea conținutului altora poate implica
-  probleme de drepturi de autor sau poate încălca termenii
-  Imgur/Instagram, indiferent de credit — verifică termenii ambelor
-  platforme, mai ales dacă intenționezi să rulezi bot-ul la scară mare.
+- **Drepturi de autor**: bot-ul include creditul sursei generic ("Via
+  Tumblr" / "Via Humor API"), fără atribuire individuală pe autor —
+  redistribuirea conținutului altora poate implica probleme de
+  drepturi de autor sau poate încălca termenii platformelor implicate,
+  indiferent de credit — verifică termenii tuturor platformelor, mai
+  ales dacă intenționezi să rulezi bot-ul la scară mare.
+- **Filtrare NSFW pe Tumblr**: filtrul folosit (`is_nsfw`) e o
+  aproximare — Tumblr nu expune un flag la fel de fiabil ca cel de pe
+  Reddit/Imgur pentru conținutul individual dintr-un tag. Merită
+  monitorizat manual din când în când, mai ales la început.
 - **Limitări Instagram**: Graph API cere ca imaginea să respecte un
   anumit raport de aspect (~4:5 până la 1.91:1); imaginile care nu se
   încadrează vor eșua la publicare — scriptul le marchează ca eșuate
   (`failed`) și trece la următorul candidat, ca să nu reîncerce la
   infinit aceeași postare.
-- **`IMGUR_TOPICS`**: fără el, bot-ul ia orice din galeria "hot"
-  generală a Imgur (foarte orientată spre meme-uri/conținut viral din
-  cultura Imgur). Cu el, filtrează după cuvinte găsite în titlu sau
-  tag-urile postării — nu e la fel de precis ca un subreddit dedicat,
-  dar apropie rezultatul de o temă anume.
-- **`FETCH_PAGES`**: câte pagini din galeria "hot" se preiau per
-  rulare (implicit 1, ~60 de postări) — crește dacă vrei un bazin mai
-  mare de candidați.
+- **`TUMBLR_FETCH_LIMIT` / `HUMOR_API_COUNT`**: câte postări se cer per
+  sursă, per rulare (implicit 20 la ambele) — crește dacă vrei un bazin
+  mai mare de candidați.
 
 ## Structura proiectului
 

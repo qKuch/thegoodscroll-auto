@@ -1,32 +1,42 @@
 """
 meme_bot.py
 
-Preia postari populare ("hot") din galeria publica Imgur, le filtreaza
-dupa un minim de puncte (upvote-uri) si exclude imaginile deja postate,
-apoi posteaza cea mai buna postare noua pe Instagram (cont Business/Creator)
-prin Graph API.
+Preia postari populare din doua surse independente — Tumblr (postari cu
+tag-uri configurabile) si Humor API — le filtreaza dupa un prag minim de
+scor si exclude imaginile deja postate, apoi posteaza cea mai buna postare
+noua pe Instagram (cont Business/Creator) prin Graph API.
 
-Nota: sursa initiala a fost Reddit, dar Reddit a oprit accesul neautentificat
-la endpoint-urile .json pe 28 mai 2026, iar auto-inregistrarea de aplicatii
-OAuth Reddit e in prezent (aug 2026) nefunctionala/blocata manual de Reddit
-("Responsible Builder Policy"). Imgur ramane self-serve si necesita doar un
-Client ID (fara login de utilizator) pentru acces citire la galeria publica.
+Nota istorica: sursa initiala a fost Reddit, inlocuita cu Imgur dupa ce
+Reddit a oprit accesul neautentificat la .json (28 mai 2026) si a blocat
+si inregistrarea de aplicatii OAuth noi. Imgur a fost la randul lui
+inlocuit cu Tumblr, galeria generala "hot" a Imgur nemaifiind suficient
+de orientata spre meme-uri.
+
+Fiecare sursa e activata independent, doar daca cheia ei e configurata —
+daca lipseste una, bot-ul continua cu cealalta, fara sa pice.
 
 Variabile de mediu necesare:
     IG_USER_ID          - ID-ul contului Instagram Business/Creator
     IG_ACCESS_TOKEN      - token de acces (long-lived) pentru Graph API
-    IMGUR_CLIENT_ID       - Client ID-ul aplicatiei Imgur (tip "Anonymous
-                            usage without user authorization")
+    (+ cel putin una din urmatoarele doua)
+    TUMBLR_API_KEY        - consumer key de la aplicatia Tumblr inregistrata
+    HUMOR_API_KEY         - API key de la humorapi.com
 
 Variabile de mediu optionale:
-    IMGUR_TOPICS        - cuvinte-cheie (separate prin virgula) cautate in
-                          titlu/tag-urile postarii, pentru filtrare tematica
-                          (implicit: gol = fara filtrare, doar "hot" general)
-    MIN_UPVOTES         - prag minim de puncte Imgur (implicit: 1000)
-    POST_LIMIT_PER_RUN  - cate postari noi se publica per rulare (implicit: 1)
-    FETCH_PAGES         - cate pagini din galeria "hot" se preiau, cate
-                          ~60 postari fiecare (implicit: 1)
-    POSTED_IDS_FILE     - calea catre fisierul de evidenta (implicit: posted_ids.json)
+    TUMBLR_TAGS          - tag-uri Tumblr (separate prin virgula), ex.
+                          "memes,funny" (implicit: "memes")
+    MIN_NOTES_TUMBLR     - prag minim de note (like-uri + reblog-uri) pe
+                          Tumblr (implicit: 500)
+    TUMBLR_FETCH_LIMIT   - cate postari se preiau per tag Tumblr per
+                          rulare (implicit: 20)
+    HUMOR_API_KEYWORDS   - cuvinte-cheie pentru Humor API (separate prin
+                          virgula), optional (implicit: fara filtrare)
+    MIN_RATING_HUMORAPI  - prag minim de rating Humor API, scala 0-10
+                          (implicit: 7)
+    HUMOR_API_COUNT      - cate meme-uri se cer per rulare de la Humor API
+                          (implicit: 20)
+    POST_LIMIT_PER_RUN   - cate postari noi se publica per rulare (implicit: 1)
+    POSTED_IDS_FILE      - calea catre fisierul de evidenta (implicit: posted_ids.json)
 """
 
 import json
@@ -51,25 +61,36 @@ logger = logging.getLogger("meme_bot")
 # `os.environ.get("X", "default")` pentru ca GitHub Actions seteaza
 # variabila ca string gol ('') cand un Repository Variable nu e definit,
 # nu o omite complet — iar .get() cu valoare implicita nu prinde cazul asta.
-IMGUR_TOPICS = [
+TUMBLR_TAGS = [
     s.strip().lower()
-    for s in (os.environ.get("IMGUR_TOPICS") or "").split(",")
+    for s in (os.environ.get("TUMBLR_TAGS") or "memes").split(",")
     if s.strip()
 ]
-MIN_UPVOTES = int(os.environ.get("MIN_UPVOTES") or "1000")
+MIN_NOTES_TUMBLR = int(os.environ.get("MIN_NOTES_TUMBLR") or "500")
+TUMBLR_FETCH_LIMIT = int(os.environ.get("TUMBLR_FETCH_LIMIT") or "20")
+
+HUMOR_API_KEYWORDS = [
+    s.strip()
+    for s in (os.environ.get("HUMOR_API_KEYWORDS") or "").split(",")
+    if s.strip()
+]
+MIN_RATING_HUMORAPI = float(os.environ.get("MIN_RATING_HUMORAPI") or "7")
+HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "20")
+
 POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
-FETCH_PAGES = int(os.environ.get("FETCH_PAGES") or "1")
 POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
 
 IG_USER_ID = os.environ.get("IG_USER_ID")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
 
-IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID")
+TUMBLR_API_KEY = os.environ.get("TUMBLR_API_KEY")
+HUMOR_API_KEY = os.environ.get("HUMOR_API_KEY")
 
 GRAPH_API_VERSION = "v21.0"
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
-IMGUR_API_BASE = "https://api.imgur.com/3"
+TUMBLR_API_BASE = "https://api.tumblr.com/v2"
+HUMOR_API_BASE = "https://api.humorapi.com"
 ALLOWED_MIME_TYPES = ("image/jpeg", "image/png")
 
 
@@ -83,6 +104,9 @@ def load_seen_ids():
     posted_ids = postari publicate cu succes
     failed_ids = postari care au esuat definitiv la publicare (nu se
                  mai reincearca, de ex. raport de aspect nepermis)
+
+    ID-urile sunt prefixate cu sursa (ex. "tumblr:123", "humorapi:6696")
+    ca sa nu se poata suprapune intre cele doua surse.
     """
     if POSTED_IDS_FILE.exists():
         try:
@@ -106,77 +130,184 @@ def save_seen_ids(posted_ids, failed_ids):
 
 
 # ---------------------------------------------------------------------------
-# Imgur (galeria publica "hot" — necesita doar Client ID, fara login)
+# Sursa 1: Tumblr (postari cu un tag anume, din tot Tumblr — nu doar dintr-un
+# blog — necesita doar un API key/consumer key, fara login de utilizator)
 # ---------------------------------------------------------------------------
 
-def fetch_hot_gallery_page(page):
-    url = f"{IMGUR_API_BASE}/gallery/hot/viral/{page}.json"
-    headers = {
-        "Authorization": f"Client-ID {IMGUR_CLIENT_ID}",
-        "User-Agent": "thegoodscroll-bot/1.0",
+def fetch_tumblr_tagged(tag, limit):
+    url = f"{TUMBLR_API_BASE}/tagged"
+    params = {
+        "tag": tag,
+        "api_key": TUMBLR_API_KEY,
+        "limit": limit,
+        "filter": "text",
     }
-    resp = requests.get(url, headers=headers, timeout=15)
+    resp = requests.get(url, params=params, timeout=15)
     resp.raise_for_status()
     payload = resp.json()
-    if not payload.get("success"):
-        raise RuntimeError(f"Raspuns Imgur nereusit: {payload}")
-    return payload.get("data") or []
+    response = payload.get("response")
+    if response is None:
+        raise RuntimeError(f"Raspuns Tumblr neasteptat pentru tag '{tag}': {payload}")
+    # endpoint-ul /tagged intoarce direct o lista; alte endpoint-uri Tumblr
+    # o pun sub o cheie "posts" — tratam ambele variante ca sa fim robusti
+    if isinstance(response, dict):
+        return response.get("posts") or []
+    return response
 
 
-def matches_topics(item):
-    """Fara IMGUR_TOPICS configurat, acceptam orice postare din galeria hot."""
-    if not IMGUR_TOPICS:
-        return True
-    title = (item.get("title") or "").lower()
-    tag_names = [t.get("name", "").lower() for t in (item.get("tags") or [])]
-    haystack = title + " " + " ".join(tag_names)
-    return any(topic in haystack for topic in IMGUR_TOPICS)
+def find_tumblr_candidates():
+    """Aduna postari-foto eligibile de pe Tumblr, sortate descrescator dupa note."""
+    if not TUMBLR_API_KEY:
+        logger.info("TUMBLR_API_KEY lipseste — sar peste sursa Tumblr.")
+        return []
 
-
-def find_candidates():
-    """Aduna postari eligibile din galeria hot Imgur, sortate descrescator dupa scor."""
     candidates = []
-    for page in range(FETCH_PAGES):
+    seen_post_ids = set()
+
+    for tag in TUMBLR_TAGS:
         try:
-            items = fetch_hot_gallery_page(page)
+            posts = fetch_tumblr_tagged(tag, TUMBLR_FETCH_LIMIT)
         except requests.RequestException as e:
-            logger.error(f"Eroare la preluarea paginii {page} din galeria Imgur: {e}")
+            logger.error(f"Eroare la preluarea tag-ului Tumblr '{tag}': {e}")
             continue
 
-        for item in items:
-            if item.get("is_album"):
+        for post in posts:
+            post_id = post.get("id")
+            if not post_id or post_id in seen_post_ids:
                 continue
-            if item.get("nsfw"):
+            seen_post_ids.add(post_id)
+
+            if post.get("type") != "photo":
                 continue
-            if item.get("type") not in ALLOWED_MIME_TYPES:
+            if post.get("is_nsfw"):
                 continue
 
-            score = item.get("points")
-            if score is None:
-                score = item.get("ups", 0) or 0
-            if score < MIN_UPVOTES:
+            note_count = post.get("note_count", 0) or 0
+            if note_count < MIN_NOTES_TUMBLR:
                 continue
 
-            if not matches_topics(item):
+            photos = post.get("photos") or []
+            if not photos:
                 continue
-
-            image_url = item.get("link")
+            image_url = (photos[0].get("original_size") or {}).get("url")
             if not image_url:
                 continue
 
+            title = (post.get("summary") or "").strip() or "Meme"
+
             candidates.append(
                 {
-                    "id": item["id"],
-                    "author": item.get("account_url") or None,
-                    "title": (item.get("title") or "").strip() or "Untitled",
-                    "score": score,
+                    "id": f"tumblr:{post_id}",
+                    "source": "tumblr",
+                    "title": title,
+                    "score": note_count,
                     "image_url": image_url,
-                    "permalink": f"https://imgur.com/gallery/{item['id']}",
+                    "permalink": post.get("post_url"),
                 }
             )
 
     candidates.sort(key=lambda c: c["score"], reverse=True)
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# Sursa 2: Humor API (humorapi.com) — baza dedicata de meme-uri, cu API
+# key gratuit. Nu ofera (dupa cate am gasit in documentatie) atribuire
+# individuala pe autor/sursa per meme.
+# ---------------------------------------------------------------------------
+
+def fetch_humorapi_memes(count):
+    url = f"{HUMOR_API_BASE}/memes/random"
+    params = {
+        "api-key": HUMOR_API_KEY,
+        "number": count,
+        "min-rating": MIN_RATING_HUMORAPI,
+    }
+    if HUMOR_API_KEYWORDS:
+        params["keywords"] = ",".join(HUMOR_API_KEYWORDS)
+
+    resp = requests.get(url, params=params, timeout=15)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    memes = payload.get("memes")
+    if memes is None and payload.get("url"):
+        # unele raspunsuri pot veni ca un singur obiect, nu o lista
+        memes = [payload]
+    return memes or []
+
+
+def find_humorapi_candidates():
+    """Aduna meme-uri eligibile de la Humor API, sortate descrescator dupa rating."""
+    if not HUMOR_API_KEY:
+        logger.info("HUMOR_API_KEY lipseste — sar peste sursa Humor API.")
+        return []
+
+    try:
+        memes = fetch_humorapi_memes(HUMOR_API_COUNT)
+    except requests.RequestException as e:
+        logger.error(f"Eroare la preluarea meme-urilor de la Humor API: {e}")
+        return []
+
+    candidates = []
+    for meme in memes:
+        meme_id = meme.get("id")
+        if meme_id is None:
+            continue
+
+        mime_type = meme.get("type")
+        if mime_type and mime_type not in ALLOWED_MIME_TYPES:
+            continue
+
+        image_url = meme.get("url")
+        if not image_url:
+            continue
+
+        rating = meme.get("rating", MIN_RATING_HUMORAPI)
+
+        candidates.append(
+            {
+                "id": f"humorapi:{meme_id}",
+                "source": "humorapi",
+                "title": (meme.get("title") or meme.get("caption") or "").strip() or "Meme",
+                "score": rating,
+                "image_url": image_url,
+                "permalink": None,
+            }
+        )
+
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Combinarea surselor
+# ---------------------------------------------------------------------------
+
+def find_candidates():
+    """Combina cele doua surse, alternand intre ele — NU sortam direct dupa
+    scor intre surse, pentru ca scalele nu sunt comparabile (note Tumblr,
+    potential in mii, vs. rating Humor API intre 0 si 10). In schimb,
+    fiecare sursa e deja sortata intern dupa propriul scor, iar aici doar
+    le intercalam, ca ambele sa aiba sanse egale sa fie alese per rulare."""
+    tumblr_candidates = find_tumblr_candidates()
+    humorapi_candidates = find_humorapi_candidates()
+
+    logger.info(
+        f"Candidati gasiti — Tumblr: {len(tumblr_candidates)}, "
+        f"Humor API: {len(humorapi_candidates)}."
+    )
+
+    merged = []
+    i = j = 0
+    while i < len(tumblr_candidates) or j < len(humorapi_candidates):
+        if i < len(tumblr_candidates):
+            merged.append(tumblr_candidates[i])
+            i += 1
+        if j < len(humorapi_candidates):
+            merged.append(humorapi_candidates[j])
+            j += 1
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -188,17 +319,16 @@ def build_caption(post):
     if len(title) > 200:
         title = title[:197] + "..."
 
-    if post["author"]:
-        credit_line = f"📸 Credit: {post['author']} (via Imgur)"
+    if post["source"] == "tumblr":
+        credit_line = "Via Tumblr"
+        link_line = f"🔗 {post['permalink']}\n\n" if post["permalink"] else ""
+        hashtags = "#memes #tumblr"
     else:
-        credit_line = "📸 Credit: anonymous Imgur user"
+        credit_line = "Via Humor API"
+        link_line = ""
+        hashtags = "#memes"
 
-    return (
-        f"{title}\n\n"
-        f"{credit_line}\n"
-        f"🔗 {post['permalink']}\n\n"
-        f"#memes #imgur"
-    )
+    return f"{title}\n\n{credit_line}\n{link_line}{hashtags}"
 
 
 def create_media_container(image_url, caption):
@@ -264,8 +394,10 @@ def post_to_instagram(post):
 def main():
     if not IG_USER_ID or not IG_ACCESS_TOKEN:
         raise SystemExit("Lipsesc variabilele de mediu IG_USER_ID / IG_ACCESS_TOKEN.")
-    if not IMGUR_CLIENT_ID:
-        raise SystemExit("Lipseste variabila de mediu IMGUR_CLIENT_ID.")
+    if not TUMBLR_API_KEY and not HUMOR_API_KEY:
+        raise SystemExit(
+            "Lipsesc ambele surse — seteaza cel putin TUMBLR_API_KEY sau HUMOR_API_KEY."
+        )
 
     posted_ids, failed_ids = load_seen_ids()
     seen_ids = posted_ids | failed_ids
