@@ -145,7 +145,7 @@ Opțional, în **Settings → Secrets and variables → Actions → Variables**
 | Nume | Exemplu | Implicit dacă lipsește |
 |---|---|---|
 | `TUMBLR_TAGS` | `memes,funny,wholesome` | `memes` |
-| `MIN_NOTES_TUMBLR` | `2000` | `20` |
+| `MIN_NOTES_TUMBLR` | `3` | `1` |
 | `HUMOR_API_KEYWORDS` | `cats,work` | gol (fără filtrare) |
 | `MIN_RATING_HUMORAPI` | `8` | `7` (scala 0-10) |
 | `POST_LIMIT_PER_RUN` | `1` | `1` |
@@ -199,6 +199,11 @@ ca să nu prinzi token-ul expirat.
   aproximare — Tumblr nu expune un flag la fel de fiabil ca cel de pe
   Reddit/Imgur pentru conținutul individual dintr-un tag. Merită
   monitorizat manual din când în când, mai ales la început.
+- **Feed-ul Tumblr `/tagged` e cronologic, nu după popularitate**:
+  confirmat cu date reale — postările proaspete au de obicei 0-3 note,
+  nu mii. `MIN_NOTES_TUMBLR` filtrează doar spam-ul evident, nu
+  selectează conținut "viral"; calitatea vine mai mult din alegerea
+  tag-urilor decât din prag.
 - **Limitări Instagram**: Graph API cere ca imaginea să respecte un
   anumit raport de aspect (~4:5 până la 1.91:1); imaginile care nu se
   încadrează vor eșua la publicare — scriptul le marchează ca eșuate
@@ -207,10 +212,10 @@ ca să nu prinzi token-ul expirat.
 - **`TUMBLR_FETCH_LIMIT`**: câte postări se cer per tag Tumblr, per rulare
   (implicit 20) — crește dacă vrei un bazin mai mare de candidați.
 - **`HUMOR_API_COUNT`**: câte apeluri separate se fac către Humor API per
-  rulare (implicit 3, deliberat conservator — planul gratuit are o cotă
-  zilnică mică, iar depășirea ei dă eroare `402 Payment Required`).
-  Verifică pe humorapi.com/dashboard cota ta reală și crește valoarea
-  doar dacă permite.
+  rulare (implicit 2). Cota gratuită confirmată e **10 cereri/zi** — cu
+  cron-ul implicit la 6 ore (4 rulări/zi), 2 per rulare înseamnă 8/zi,
+  sub cotă. Dacă o depășești, primești `402 Payment Required`. Verifică
+  pe humorapi.com/dashboard cota ta reală înainte să crești valoarea.
 
 ## Structura proiectului
 
