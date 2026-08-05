@@ -38,8 +38,9 @@ Variabile de mediu optionale:
                           (implicit: 7)
     HUMOR_API_COUNT      - cate apeluri separate se fac catre Humor API per
                           rulare (endpoint-ul intoarce un singur meme per
-                          apel) (implicit: 3 — planul gratuit are o cota
-                          zilnica mica; verifica humorapi.com/dashboard
+                          apel) (implicit: 2 — cota gratuita confirmata e
+                          10/zi; cu cron la 6h (4 rulari/zi), 2 per rulare
+                          = 8/zi, sub cota. Verifica humorapi.com/dashboard
                           pentru cota reala si ajusteaza daca permite mai mult)
     POST_LIMIT_PER_RUN   - cate postari noi se publica per rulare (implicit: 1)
     POSTED_IDS_FILE      - calea catre fisierul de evidenta (implicit: posted_ids.json)
@@ -82,7 +83,7 @@ HUMOR_API_KEYWORDS = [
     if s.strip()
 ]
 MIN_RATING_HUMORAPI = float(os.environ.get("MIN_RATING_HUMORAPI") or "7")
-HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "3")
+HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "2")
 
 POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
 POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
@@ -365,14 +366,12 @@ def build_caption(post):
 
     if post["source"] == "tumblr":
         credit_line = "Via Tumblr"
-        link_line = f"🔗 {post['permalink']}\n\n" if post["permalink"] else ""
         hashtags = "#memes #tumblr"
     else:
         credit_line = "Via Humor API"
-        link_line = ""
         hashtags = "#memes"
 
-    return f"{title}\n\n{credit_line}\n{link_line}{hashtags}"
+    return f"{title}\n\n{credit_line}\n{hashtags}"
 
 
 def create_media_container(image_url, caption):
