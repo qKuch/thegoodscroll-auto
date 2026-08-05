@@ -199,7 +199,11 @@ def find_tumblr_candidates():
             continue
 
         if posts:
-            logger.info(f"[DEBUG TEMPORAR] Prima postare Tumblr bruta: {json.dumps(posts[0])[:3000]}")
+            summary = [
+                f"(notes={p.get('note_count')}, has_img={bool(extract_tumblr_image_url(p))}, type={p.get('type')})"
+                for p in posts
+            ]
+            logger.info(f"[DEBUG TEMPORAR] {len(posts)} postari pentru tag '{tag}': {summary}")
 
         for post in posts:
             post_id = post.get("id")
