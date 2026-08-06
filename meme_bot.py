@@ -6,6 +6,11 @@ tag-uri configurabile) si Humor API — le filtreaza dupa un prag minim de
 scor si exclude imaginile deja postate, apoi posteaza cea mai buna postare
 noua pe Instagram (cont Business/Creator) prin Graph API.
 
+In plus, opțional, posteaza si pe o Pagina de Facebook — flux complet
+separat, cu poze de la Picsum Photos (poze reale, de pe Unsplash, cu
+autor), nu meme-uri. Se activeaza doar daca FB_PAGE_ID si
+FB_PAGE_ACCESS_TOKEN sunt setate; altfel bot-ul continua doar cu Instagram.
+
 Nota istorica: sursa initiala a fost Reddit, inlocuita cu Imgur dupa ce
 Reddit a oprit accesul neautentificat la .json (28 mai 2026) si a blocat
 si inregistrarea de aplicatii OAuth noi. Imgur a fost la randul lui
@@ -22,7 +27,7 @@ Variabile de mediu necesare:
     TUMBLR_API_KEY        - consumer key de la aplicatia Tumblr inregistrata
     HUMOR_API_KEY         - API key de la humorapi.com
 
-Variabile de mediu optionale:
+Variabile de mediu optionale (Instagram):
     TUMBLR_TAGS          - tag-uri Tumblr (separate prin virgula), ex.
                           "memes,funny" (implicit: "memes")
     MIN_NOTES_TUMBLR     - prag minim de note (like-uri + reblog-uri) pe
@@ -42,13 +47,27 @@ Variabile de mediu optionale:
                           10/zi; cu cron la 6h (4 rulari/zi), 2 per rulare
                           = 8/zi, sub cota. Verifica humorapi.com/dashboard
                           pentru cota reala si ajusteaza daca permite mai mult)
-    POST_LIMIT_PER_RUN   - cate postari noi se publica per rulare (implicit: 1)
+    POST_LIMIT_PER_RUN   - cate postari noi se publica pe Instagram per
+                          rulare (implicit: 1)
     POSTED_IDS_FILE      - calea catre fisierul de evidenta (implicit: posted_ids.json)
+
+Variabile de mediu pentru Facebook (optional — tot fluxul e sarit daca
+oricare din cele doua lipseste):
+    FB_PAGE_ID            - ID-ul Paginii de Facebook
+    FB_PAGE_ACCESS_TOKEN  - token de Pagina (nu de utilizator!), cu
+                          permisiunea pages_manage_posts
+
+Variabile de mediu optionale (Facebook):
+    FB_POST_LIMIT_PER_RUN - cate poze noi se publica pe Facebook per
+                          rulare (implicit: 1)
+    PICSUM_PAGES_PER_RUN  - cate pagini Picsum (a 100 poze fiecare) se
+                          scaneaza per rulare, alese aleatoriu (implicit: 2)
 """
 
 import json
 import logging
 import os
+import random
 import re
 import time
 from pathlib import Path
@@ -88,17 +107,24 @@ HUMOR_API_COUNT = int(os.environ.get("HUMOR_API_COUNT") or "2")
 POST_LIMIT_PER_RUN = int(os.environ.get("POST_LIMIT_PER_RUN") or "1")
 POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
 
+FB_POST_LIMIT_PER_RUN = int(os.environ.get("FB_POST_LIMIT_PER_RUN") or "1")
+PICSUM_PAGES_PER_RUN = int(os.environ.get("PICSUM_PAGES_PER_RUN") or "2")
+
 IG_USER_ID = os.environ.get("IG_USER_ID")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
 
 TUMBLR_API_KEY = os.environ.get("TUMBLR_API_KEY")
 HUMOR_API_KEY = os.environ.get("HUMOR_API_KEY")
 
+FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
+FB_PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+
 GRAPH_API_VERSION = "v21.0"
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 TUMBLR_API_BASE = "https://api.tumblr.com/v2"
 HUMOR_API_BASE = "https://api.humorapi.com"
+PICSUM_API_BASE = "https://picsum.photos"
 ALLOWED_MIME_TYPES = ("image/jpeg", "image/png")
 
 
@@ -326,6 +352,80 @@ def find_humorapi_candidates():
 
 
 # ---------------------------------------------------------------------------
+# Sursa pentru Facebook: Picsum Photos (poze reale de pe Unsplash, cu autor,
+# fara cheie API, fara cota) — flux complet separat de meme-urile de mai
+# sus, folosit doar pentru Facebook.
+# ---------------------------------------------------------------------------
+
+def fetch_picsum_page(page, limit=100):
+    url = f"{PICSUM_API_BASE}/v2/list"
+    params = {"page": page, "limit": limit}
+    resp = requests.get(url, params=params, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def find_picsum_candidates():
+    """Scaneaza cateva pagini Picsum alese aleatoriu (nu mereu aceleasi,
+    ca sa nu epuizam rapid primele 100 de poze) — dedup-ul cu ce s-a
+    postat deja se face in main(), la fel ca la sursele de meme-uri."""
+    candidates = []
+    seen_photo_ids = set()
+
+    max_page = 50  # Picsum are mii de poze; ne oprim la primele ~5000
+    pages_to_try = random.sample(
+        range(1, max_page + 1), min(PICSUM_PAGES_PER_RUN, max_page)
+    )
+
+    for page in pages_to_try:
+        try:
+            photos = fetch_picsum_page(page)
+        except requests.RequestException as e:
+            logger.error(f"Eroare la preluarea paginii {page} din Picsum: {e}")
+            continue
+
+        for photo in photos:
+            photo_id = photo.get("id")
+            if not photo_id or photo_id in seen_photo_ids:
+                continue
+            seen_photo_ids.add(photo_id)
+
+            width = photo.get("width") or 1600
+            height = photo.get("height") or 1600
+            image_url = f"{PICSUM_API_BASE}/id/{photo_id}/{width}/{height}"
+
+            candidates.append(
+                {
+                    "id": f"picsum:{photo_id}",
+                    "source": "picsum",
+                    "author": photo.get("author") or "necunoscut",
+                    "image_url": image_url,
+                }
+            )
+
+    return candidates
+
+
+def build_facebook_caption(photo):
+    return f"📸 Foto: {photo['author']}\nVia Unsplash"
+
+
+def post_photo_to_facebook(photo):
+    url = f"{GRAPH_BASE}/{FB_PAGE_ID}/photos"
+    payload = {
+        "url": photo["image_url"],
+        "caption": build_facebook_caption(photo),
+        "access_token": FB_PAGE_ACCESS_TOKEN,
+    }
+    resp = requests.post(url, data=payload, timeout=30)
+    data = resp.json()
+    if resp.status_code != 200 or "id" not in data:
+        raise RuntimeError(f"Eroare la postarea pe Facebook: {data}")
+    logger.info(f"Postat cu succes pe Facebook. Post ID: {data['id']}")
+    return data["id"]
+
+
+# ---------------------------------------------------------------------------
 # Combinarea surselor
 # ---------------------------------------------------------------------------
 
@@ -445,33 +545,63 @@ def main():
     posted_ids, failed_ids = load_seen_ids()
     seen_ids = posted_ids | failed_ids
 
+    # --- Instagram: meme-uri de pe Tumblr + Humor API ---
     candidates = find_candidates()
-    logger.info(f"Am gasit {len(candidates)} postari candidate (inainte de filtrarea duplicatelor).")
-
+    logger.info(
+        f"Am gasit {len(candidates)} postari candidate pentru Instagram "
+        f"(inainte de filtrarea duplicatelor)."
+    )
     new_candidates = [c for c in candidates if c["id"] not in seen_ids]
-    logger.info(f"{len(new_candidates)} postari noi, neprocesate inca.")
+    logger.info(f"{len(new_candidates)} postari Instagram noi, neprocesate inca.")
 
-    if not new_candidates:
-        logger.info("Nimic nou de postat.")
-        return
-
-    posted_count = 0
+    ig_posted_count = 0
     for post in new_candidates:
-        if posted_count >= POST_LIMIT_PER_RUN:
+        if ig_posted_count >= POST_LIMIT_PER_RUN:
             break
         try:
             post_to_instagram(post)
             posted_ids.add(post["id"])
-            posted_count += 1
+            seen_ids.add(post["id"])
+            ig_posted_count += 1
         except Exception as e:
-            logger.error(f"Esec definitiv la postarea {post['id']}: {e}")
+            logger.error(f"Esec definitiv la postarea Instagram {post['id']}: {e}")
             failed_ids.add(post["id"])
+            seen_ids.add(post["id"])
         finally:
             # salvam dupa fiecare incercare, ca sa nu pierdem progresul
             # daca o incercare ulterioara arunca o eroare neasteptata
             save_seen_ids(posted_ids, failed_ids)
 
-    logger.info(f"Rulare completa. Postari noi publicate: {posted_count}.")
+    if not new_candidates:
+        logger.info("Nimic nou de postat pe Instagram.")
+
+    # --- Facebook: poze Picsum (flux complet separat, optional) ---
+    if FB_PAGE_ID and FB_PAGE_ACCESS_TOKEN:
+        picsum_candidates = find_picsum_candidates()
+        new_picsum = [c for c in picsum_candidates if c["id"] not in seen_ids]
+        logger.info(f"{len(new_picsum)} poze Picsum noi, neprocesate inca.")
+
+        fb_posted_count = 0
+        for photo in new_picsum:
+            if fb_posted_count >= FB_POST_LIMIT_PER_RUN:
+                break
+            try:
+                post_photo_to_facebook(photo)
+                posted_ids.add(photo["id"])
+                seen_ids.add(photo["id"])
+                fb_posted_count += 1
+            except Exception as e:
+                logger.error(f"Esec definitiv la postarea Facebook {photo['id']}: {e}")
+                failed_ids.add(photo["id"])
+                seen_ids.add(photo["id"])
+            finally:
+                save_seen_ids(posted_ids, failed_ids)
+    else:
+        logger.info(
+            "FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN lipsesc — sar peste publicarea pe Facebook."
+        )
+
+    logger.info(f"Rulare completa. Postari Instagram noi publicate: {ig_posted_count}.")
 
 
 if __name__ == "__main__":
