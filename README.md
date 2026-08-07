@@ -1,9 +1,11 @@
-# Meme Bot pentru Instagram (Tumblr + Humor API → Instagram, prin GitHub Actions)
+# Meme Bot pentru Instagram + Facebook (prin GitHub Actions)
 
 Bot care preia automat postări populare de tip imagine din **două surse
 independente** — Tumblr (postări cu tag-uri configurabile) și Humor API —
-și le postează pe un cont Instagram Business/Creator. Rulează integral pe
-GitHub Actions — fără server propriu, fără cron local.
+și le postează pe un cont Instagram Business/Creator. Opțional, poate
+posta simultan și pe o Pagină de Facebook, cu poze de la Picsum Photos
+(flux complet separat, nu meme-uri). Rulează integral pe GitHub Actions
+— fără server propriu, fără cron local.
 
 > **Notă istorică**: sursa inițială a proiectului a fost Reddit, apoi
 > Imgur. Reddit a oprit accesul neautentificat la `.json` pe 28 mai 2026
@@ -123,7 +125,34 @@ Răspunsul conține `access_token`-ul de lungă durată — acesta e
    fără review manual.
 3. Copiezi cheia — asta e `HUMOR_API_KEY`.
 
-### 7. Adăugarea secretelor în GitHub
+### 7. (Opțional) Postare pe Facebook, cu poze Picsum
+
+Pe lângă Instagram, bot-ul poate posta opțional și pe o Pagină de
+Facebook — flux complet separat, cu poze reale de la Picsum Photos
+(nu meme-uri). Dacă nu vrei asta, sari peste acest pas — bot-ul
+funcționează normal doar cu Instagram.
+
+1. Aplicația ta Meta trebuie să aibă și cazul de utilizare **"Manage
+   everything on your Page"** (Pages API) — diferit de "Facebook Login
+   for Business". Din **Cazuri de utilizare → Add use cases**, îl
+   adaugi dacă nu-l ai deja.
+2. După ce l-ai adăugat, **Customize** lângă el → permisiunea
+   `pages_manage_posts` ar trebui să apară/să fie adăugată automat.
+3. În **Graph API Explorer**, regenerezi tokenul de **User Token**,
+   bifând de data asta și `pages_manage_posts`, pe lângă toate
+   celelalte permisiuni de la pasul 3.
+4. Faci din nou schimbul pentru token de lungă durată (pasul 4).
+5. Cu noul token de utilizator, scrii în Graph API Explorer:
+   ```
+   me/accounts
+   ```
+   **Submit**. Lângă numele Paginii tale, cauți câmpul `access_token`
+   — **e diferit de tokenul de utilizator**, e specific Paginii.
+   Copiază-l — acesta e `FB_PAGE_ACCESS_TOKEN`.
+6. `FB_PAGE_ID` e ID-ul Paginii (același pe care l-ai obținut la pasul
+   3, din `me/accounts`).
+
+### 8. Adăugarea secretelor în GitHub
 
 În repo → **Settings → Secrets and variables → Actions → New
 repository secret**:
@@ -134,10 +163,14 @@ repository secret**:
 | `IG_ACCESS_TOKEN` | token-ul de lungă durată de la pasul 4 |
 | `TUMBLR_API_KEY` | Consumer Key-ul de la pasul 5 |
 | `HUMOR_API_KEY` | API key-ul de la pasul 6 |
+| `FB_PAGE_ID` | (opțional) ID-ul Paginii, de la pasul 7 |
+| `FB_PAGE_ACCESS_TOKEN` | (opțional) token-ul de Pagină, de la pasul 7 |
 
 Ai nevoie de **cel puțin una** din `TUMBLR_API_KEY` / `HUMOR_API_KEY`
 ca bot-ul să pornească — dar recomand ambele, exact ca să existe
-redundanță dacă una din surse pică vreodată.
+redundanță dacă una din surse pică vreodată. `FB_PAGE_ID` /
+`FB_PAGE_ACCESS_TOKEN` sunt complet opționale — fără ele, bot-ul
+postează doar pe Instagram.
 
 Opțional, în **Settings → Secrets and variables → Actions → Variables**
 (nu sunt secrete, doar configurare, cu valori implicite dacă lipsesc):
@@ -149,8 +182,11 @@ Opțional, în **Settings → Secrets and variables → Actions → Variables**
 | `HUMOR_API_KEYWORDS` | `cats,work` | gol (fără filtrare) |
 | `MIN_RATING_HUMORAPI` | `8` | `7` (scala 0-10) |
 | `POST_LIMIT_PER_RUN` | `1` | `1` |
+| `FB_POST_LIMIT_PER_RUN` | `1` | `1` |
+| `PICSUM_PAGES_PER_RUN` | `3` | `2` |
+| `MAX_ATTEMPTS_PER_RUN` | `15` | `10` |
 
-### 8. Pune fișierele în repo
+### 9. Pune fișierele în repo
 
 Adaugă toate fișierele livrate (inclusiv `.github/workflows/meme_bot.yml`
 și `posted_ids.json`) în repo și fă push. GitHub Actions detectează
