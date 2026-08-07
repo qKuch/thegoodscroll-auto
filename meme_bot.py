@@ -414,7 +414,7 @@ def find_picsum_candidates():
 
 
 def build_facebook_caption(photo):
-    return f"📸 Foto: {photo['author']}\nVia Unsplash"
+    return f"📸 Foto: {photo['author']}"
 
 
 def post_photo_to_facebook(photo):
