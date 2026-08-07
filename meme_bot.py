@@ -49,6 +49,12 @@ Variabile de mediu optionale (Instagram):
                           pentru cota reala si ajusteaza daca permite mai mult)
     POST_LIMIT_PER_RUN   - cate postari noi se publica pe Instagram per
                           rulare (implicit: 1)
+    MAX_ATTEMPTS_PER_RUN - plasa de siguranta: cate incercari (nu neaparat
+                          reusite) se fac per rulare, pe fiecare flux
+                          (Instagram / Facebook) separat, inainte sa se
+                          opreasca — ca sa nu incerce sute de postari
+                          esuate la rand daca ceva se strica sistematic
+                          (implicit: 10)
     POSTED_IDS_FILE      - calea catre fisierul de evidenta (implicit: posted_ids.json)
 
 Variabile de mediu pentru Facebook (optional — tot fluxul e sarit daca
@@ -109,6 +115,7 @@ POSTED_IDS_FILE = Path(os.environ.get("POSTED_IDS_FILE") or "posted_ids.json")
 
 FB_POST_LIMIT_PER_RUN = int(os.environ.get("FB_POST_LIMIT_PER_RUN") or "1")
 PICSUM_PAGES_PER_RUN = int(os.environ.get("PICSUM_PAGES_PER_RUN") or "2")
+MAX_ATTEMPTS_PER_RUN = int(os.environ.get("MAX_ATTEMPTS_PER_RUN") or "10")
 
 IG_USER_ID = os.environ.get("IG_USER_ID")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
@@ -555,9 +562,18 @@ def main():
     logger.info(f"{len(new_candidates)} postari Instagram noi, neprocesate inca.")
 
     ig_posted_count = 0
+    ig_attempts = 0
     for post in new_candidates:
         if ig_posted_count >= POST_LIMIT_PER_RUN:
             break
+        if ig_attempts >= MAX_ATTEMPTS_PER_RUN:
+            logger.warning(
+                f"Am atins limita de {MAX_ATTEMPTS_PER_RUN} incercari Instagram "
+                f"per rulare, fara succes — opresc, pare o problema sistematica, "
+                f"nu ghinion la cateva postari."
+            )
+            break
+        ig_attempts += 1
         try:
             post_to_instagram(post)
             posted_ids.add(post["id"])
@@ -582,9 +598,18 @@ def main():
         logger.info(f"{len(new_picsum)} poze Picsum noi, neprocesate inca.")
 
         fb_posted_count = 0
+        fb_attempts = 0
         for photo in new_picsum:
             if fb_posted_count >= FB_POST_LIMIT_PER_RUN:
                 break
+            if fb_attempts >= MAX_ATTEMPTS_PER_RUN:
+                logger.warning(
+                    f"Am atins limita de {MAX_ATTEMPTS_PER_RUN} incercari Facebook "
+                    f"per rulare, fara succes — opresc, pare o problema sistematica, "
+                    f"nu ghinion la cateva poze."
+                )
+                break
+            fb_attempts += 1
             try:
                 post_photo_to_facebook(photo)
                 posted_ids.add(photo["id"])
