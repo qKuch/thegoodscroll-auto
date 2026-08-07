@@ -380,6 +380,7 @@ def find_picsum_candidates():
     for page in pages_to_try:
         try:
             photos = fetch_picsum_page(page)
+            logger.info(f"[DEBUG TEMPORAR] Picsum pagina {page}: tip={type(photos)}, continut={str(photos)[:500]}")
         except requests.RequestException as e:
             logger.error(f"Eroare la preluarea paginii {page} din Picsum: {e}")
             continue
