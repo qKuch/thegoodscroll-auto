@@ -36,11 +36,15 @@ jobs:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           TUMBLR_API_KEY: ${{ secrets.TUMBLR_API_KEY }}
           HUMOR_API_KEY: ${{ secrets.HUMOR_API_KEY }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           TUMBLR_TAGS: ${{ vars.TUMBLR_TAGS }}
           HUMOR_API_KEYWORDS: ${{ vars.HUMOR_API_KEYWORDS }}
           MIN_NOTES_TUMBLR: ${{ vars.MIN_NOTES_TUMBLR }}
           MIN_RATING_HUMORAPI: ${{ vars.MIN_RATING_HUMORAPI }}
           POST_LIMIT_PER_RUN: ${{ vars.POST_LIMIT_PER_RUN }}
+          FB_POST_LIMIT_PER_RUN: ${{ vars.FB_POST_LIMIT_PER_RUN }}
+          PICSUM_PAGES_PER_RUN: ${{ vars.PICSUM_PAGES_PER_RUN }}
         run: python meme_bot.py
 
       - name: Commit & push posted_ids.json daca s-a schimbat
