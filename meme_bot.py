@@ -372,7 +372,7 @@ def find_picsum_candidates():
     candidates = []
     seen_photo_ids = set()
 
-    max_page = 50  # Picsum are mii de poze; ne oprim la primele ~5000
+    max_page = 10  # catalogul Picsum are ~1000 de poze; la 100/pagina, ~10 pagini valide
     pages_to_try = random.sample(
         range(1, max_page + 1), min(PICSUM_PAGES_PER_RUN, max_page)
     )
@@ -380,7 +380,6 @@ def find_picsum_candidates():
     for page in pages_to_try:
         try:
             photos = fetch_picsum_page(page)
-            logger.info(f"[DEBUG TEMPORAR] Picsum pagina {page}: tip={type(photos)}, continut={str(photos)[:500]}")
         except requests.RequestException as e:
             logger.error(f"Eroare la preluarea paginii {page} din Picsum: {e}")
             continue
