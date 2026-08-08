@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Authorization callback — thegoodscroll bot</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 60px auto; padding: 0 20px; line-height: 1.6; color: #222; text-align: center; }
+  #code { font-family: monospace; font-size: 1.1em; background: #f2f2f2; padding: 16px; border-radius: 8px; word-break: break-all; margin: 20px 0; user-select: all; }
+  button { padding: 10px 20px; font-size: 1em; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Authorization complete</h1>
+<p>Copy the code below and paste it wherever you need it:</p>
+<div id="code">(reading URL...)</div>
+<button onclick="copyCode()">Copy to clipboard</button>
+<p id="copied" style="color: green; display:none;">Copied!</p>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const error = params.get('error');
+  const codeEl = document.getElementById('code');
+  if (code) {
+    codeEl.textContent = code;
+  } else if (error) {
+    codeEl.textContent = 'Error: ' + error + ' — ' + (params.get('error_description') || '');
+  } else {
+    codeEl.textContent = 'No code found in URL.';
+  }
+  function copyCode() {
+    navigator.clipboard.writeText(codeEl.textContent).then(() => {
+      document.getElementById('copied').style.display = 'block';
+    });
+  }
+</script>
+</body>
+</html>
